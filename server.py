@@ -4,8 +4,10 @@ import os
 import subprocess
 import socket
 import re
-from typing import List, Optional
+import time
+from typing import List, Optional, Dict
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,12 +16,17 @@ from fastapi.responses import StreamingResponse, HTMLResponse
 import pychromecast
 import zeroconf
 
+# Import version and configuration
+from version import __version__, get_version_info
+from config_manager import config
+
 # --- Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("AudioBridge")
 
-PORT = 8000
-STREAM_ENDPOINT = "/live.mp3"
+# Load configuration values
+PORT = config.get('server', 'port', default=8000)
+STREAM_ENDPOINT = config.get('server', 'stream_endpoint', default='/live.mp3')
 
 
 # --- Global State ---
@@ -34,8 +41,45 @@ class SystemState:
         self.active_connections: List[WebSocket] = []
         self.current_rms = 0
         self.bt_devices = []
-        self.bt_connected: Optional[str] = None  # FIX #1: Track connected BT device
-        self.current_audio_source: Optional[str] = None  # Track which source FFmpeg is using
+        self.bt_connected: Optional[str] = None
+        self.current_audio_source: Optional[str] = None
+
+        # Enhanced tracking (v2.0.0)
+        self.stream_start_time: Optional[float] = None
+        self.connection_history: List[Dict] = []  # Track connection events
+        self.error_log: List[Dict] = []  # Track errors
+        self.last_bt_check: Optional[float] = None
+        self.bt_reconnect_attempts = 0
+        self.stream_bitrate: str = config.get('audio', 'bitrate', default='192k')
+        self.stream_sample_rate: int = config.get('audio', 'sample_rate', default=44100)
+        self.last_error: Optional[str] = None
+
+    def add_connection_event(self, event_type: str, details: str):
+        """Add a connection event to history."""
+        event = {
+            "timestamp": datetime.now().isoformat(),
+            "type": event_type,
+            "details": details
+        }
+        self.connection_history.append(event)
+        # Keep only last 50 events
+        if len(self.connection_history) > 50:
+            self.connection_history = self.connection_history[-50:]
+        logger.info(f"Connection event: {event_type} - {details}")
+
+    def add_error(self, error_type: str, message: str):
+        """Add an error to the error log."""
+        error = {
+            "timestamp": datetime.now().isoformat(),
+            "type": error_type,
+            "message": message
+        }
+        self.error_log.append(error)
+        self.last_error = message
+        # Keep only last 100 errors
+        if len(self.error_log) > 100:
+            self.error_log = self.error_log[-100:]
+        logger.error(f"Error logged: {error_type} - {message}")
 
 
 state = SystemState()
@@ -110,14 +154,27 @@ async def broadcast_status():
                 "model": cast_info.model_name
             })
 
-    # FIX #1: Include bt_connected in status
+    # Calculate stream duration and latency estimate
+    stream_duration = None
+    if state.stream_start_time and state.is_streaming:
+        stream_duration = int(time.time() - state.stream_start_time)
+
+    # Enhanced status (v2.0.0)
     status = {
+        "version": __version__,
         "streaming": state.is_streaming,
         "selected_cast": state.selected_cast_uuid,
         "rms": state.current_rms,
         "bt_devices": state.bt_devices,
-        "bt_connected": state.bt_connected,  # Added this field
-        "casts": cast_list
+        "bt_connected": state.bt_connected,
+        "casts": cast_list,
+        # New fields
+        "audio_source": state.current_audio_source,
+        "bitrate": state.stream_bitrate,
+        "sample_rate": state.stream_sample_rate,
+        "stream_duration": stream_duration,
+        "last_error": state.last_error,
+        "connection_history": state.connection_history[-10:] if state.connection_history else []
     }
 
     to_remove = []
@@ -244,28 +301,52 @@ def start_ffmpeg_stream():
         logger.info("FFmpeg already running")
         return
 
-    # Try to use Bluetooth source if available
-    bt_source = get_bluetooth_audio_source()
-    
-    if bt_source:
-        input_source = bt_source
-        logger.info(f"Using Bluetooth audio source: {input_source}")
+    # Try to use preferred source from config, otherwise auto-detect
+    preferred_source = config.get('bluetooth', 'preferred_source')
+
+    if preferred_source:
+        input_source = preferred_source
+        logger.info(f"Using preferred audio source from config: {input_source}")
     else:
-        input_source = get_default_audio_source()
-        logger.warning(f"No Bluetooth source found, using default: {input_source}")
-    
+        # Try to use Bluetooth source if available
+        bt_source = get_bluetooth_audio_source()
+
+        if bt_source:
+            input_source = bt_source
+            logger.info(f"Using Bluetooth audio source: {input_source}")
+            state.add_connection_event("audio_source", f"Connected to Bluetooth source: {bt_source}")
+        else:
+            if config.get('fallback', 'use_default_audio_source', default=True):
+                input_source = get_default_audio_source()
+                logger.warning(f"No Bluetooth source found, using default: {input_source}")
+                state.add_error("bluetooth", "No Bluetooth source found, using default audio source")
+            else:
+                state.add_error("bluetooth", "No Bluetooth source found and fallback disabled")
+                return
+
     # Store the source being used for debugging
     state.current_audio_source = input_source
-    
-    # FFmpeg command - simpler version without astats for reliability
+
+    # Get audio settings from config
+    channels = config.get('audio', 'channels', default=2)
+    sample_rate = config.get('audio', 'sample_rate', default=44100)
+    bitrate = config.get('audio', 'bitrate', default='192k')
+    audio_format = config.get('audio', 'format', default='mp3')
+    buffer_size = config.get('audio', 'buffer_size', default=4096)
+
+    # Update state
+    state.stream_bitrate = bitrate
+    state.stream_sample_rate = sample_rate
+
+    # FFmpeg command with configurable settings
     cmd = [
         "ffmpeg",
         "-f", "pulse",
         "-i", input_source,
-        "-ac", "2",
-        "-ar", "44100",
-        "-b:a", "192k",
-        "-f", "mp3",
+        "-ac", str(channels),
+        "-ar", str(sample_rate),
+        "-b:a", bitrate,
+        "-f", audio_format,
         "-fflags", "+nobuffer",
         "-flags", "+low_delay",
         "pipe:1"
@@ -278,11 +359,14 @@ def start_ffmpeg_stream():
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            bufsize=4096
+            bufsize=buffer_size
         )
         state.is_streaming = True
+        state.stream_start_time = time.time()
+        state.last_error = None
         logger.info(f"FFmpeg started with PID: {state.ffmpeg_process.pid}")
-        
+        state.add_connection_event("stream", f"Audio stream started (bitrate: {bitrate}, sample rate: {sample_rate}Hz)")
+
         # Start a background task to log FFmpeg errors
         import threading
         def log_ffmpeg_stderr():
@@ -293,14 +377,17 @@ def start_ffmpeg_stream():
                         logger.debug(f"FFmpeg: {line_str}")
             except:
                 pass
-        
+
         stderr_thread = threading.Thread(target=log_ffmpeg_stderr, daemon=True)
         stderr_thread.start()
-        
+
     except Exception as e:
-        logger.error(f"Failed to start FFmpeg: {e}")
+        error_msg = f"Failed to start FFmpeg: {e}"
+        logger.error(error_msg)
+        state.add_error("stream", error_msg)
         state.ffmpeg_process = None
         state.is_streaming = False
+        state.stream_start_time = None
 
 
 def stop_ffmpeg_stream():
@@ -311,7 +398,9 @@ def stop_ffmpeg_stream():
         except subprocess.TimeoutExpired:
             state.ffmpeg_process.kill()
         state.ffmpeg_process = None
+        state.add_connection_event("stream", "Audio stream stopped")
     state.is_streaming = False
+    state.stream_start_time = None
 
 
 async def stream_generator():
@@ -468,11 +557,15 @@ async def api_pair_bt(mac: str):
     """Pair with a specific Bluetooth device by MAC address."""
     # Validate MAC format
     if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', mac):
-        raise HTTPException(status_code=400, detail="Invalid MAC address format")
-    
+        error_msg = "Invalid MAC address format"
+        state.add_error("bluetooth", error_msg)
+        raise HTTPException(status_code=400, detail=error_msg)
+
     try:
         # First, try to pair
         logger.info(f"Attempting to pair with {mac}")
+        state.add_connection_event("bluetooth", f"Attempting to pair with {mac}")
+
         pair_proc = await asyncio.create_subprocess_shell(
             f"bluetoothctl pair {mac}",
             stdout=asyncio.subprocess.PIPE,
@@ -480,12 +573,12 @@ async def api_pair_bt(mac: str):
         )
         stdout, stderr = await asyncio.wait_for(pair_proc.communicate(), timeout=30)
         pair_output = stdout.decode() + stderr.decode()
-        
+
         # Check if already paired or pairing succeeded
         if "already exists" in pair_output.lower() or "pairing successful" in pair_output.lower() or pair_proc.returncode == 0:
             # Trust the device
             await asyncio.create_subprocess_shell(f"bluetoothctl trust {mac}")
-            
+
             # Now connect
             logger.info(f"Attempting to connect to {mac}")
             connect_proc = await asyncio.create_subprocess_shell(
@@ -495,18 +588,27 @@ async def api_pair_bt(mac: str):
             )
             conn_stdout, conn_stderr = await asyncio.wait_for(connect_proc.communicate(), timeout=30)
             connect_output = conn_stdout.decode() + conn_stderr.decode()
-            
+
             if "successful" in connect_output.lower() or connect_proc.returncode == 0:
+                state.add_connection_event("bluetooth", f"Successfully paired and connected to {mac}")
+                state.last_error = None
                 return {"status": "connected", "mac": mac, "message": "Successfully paired and connected"}
             else:
+                state.add_connection_event("bluetooth", f"Paired with {mac} but connection incomplete")
                 return {"status": "paired", "mac": mac, "message": "Paired but connection may require action on the device", "details": connect_output}
         else:
-            return {"status": "failed", "mac": mac, "message": "Pairing failed", "details": pair_output}
-            
+            error_msg = f"Pairing failed with {mac}"
+            state.add_error("bluetooth", error_msg)
+            return {"status": "failed", "mac": mac, "message": "Pairing failed. Make sure the device is in pairing mode.", "details": pair_output}
+
     except asyncio.TimeoutError:
+        error_msg = f"Pairing timed out for {mac} - device may need to be in pairing mode"
+        state.add_error("bluetooth", error_msg)
         return {"status": "timeout", "mac": mac, "message": "Pairing timed out - device may need to be in pairing mode"}
     except Exception as e:
-        logger.error(f"Error pairing with {mac}: {e}")
+        error_msg = f"Error pairing with {mac}: {e}"
+        logger.error(error_msg)
+        state.add_error("bluetooth", error_msg)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -867,6 +969,224 @@ async def stop_cast():
     state.selected_cast_uuid = None
     stop_ffmpeg_stream()  # Also stop the stream when casting stops
     return {"status": "stopped"}
+
+
+# --- v2.0.0 New API Endpoints ---
+
+@app.get("/api/version")
+async def api_version():
+    """Get application version information."""
+    return get_version_info()
+
+
+@app.get("/api/config")
+async def api_get_config():
+    """Get current configuration."""
+    return config.get_all()
+
+
+@app.post("/api/config")
+async def api_update_config(updates: Dict):
+    """Update configuration settings."""
+    try:
+        # Update configuration
+        if config.update(updates):
+            # Save to file
+            if config.save_config():
+                state.add_connection_event("config", "Configuration updated successfully")
+                return {"status": "success", "message": "Configuration updated", "config": config.get_all()}
+            else:
+                error_msg = "Failed to save configuration"
+                state.add_error("config", error_msg)
+                raise HTTPException(status_code=500, detail=error_msg)
+        else:
+            error_msg = "Failed to update configuration"
+            state.add_error("config", error_msg)
+            raise HTTPException(status_code=400, detail=error_msg)
+    except Exception as e:
+        error_msg = f"Error updating configuration: {e}"
+        state.add_error("config", error_msg)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/config/reload")
+async def api_reload_config():
+    """Reload configuration from file."""
+    try:
+        config.reload()
+        # Update runtime values
+        global PORT
+        PORT = config.get('server', 'port', default=8000)
+        state.stream_bitrate = config.get('audio', 'bitrate', default='192k')
+        state.stream_sample_rate = config.get('audio', 'sample_rate', default=44100)
+        state.add_connection_event("config", "Configuration reloaded from file")
+        return {"status": "success", "message": "Configuration reloaded", "config": config.get_all()}
+    except Exception as e:
+        error_msg = f"Error reloading configuration: {e}"
+        state.add_error("config", error_msg)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/status/full")
+async def api_full_status():
+    """Get comprehensive system status."""
+    cast_list = []
+    if state.cast_browser:
+        for uuid, cast_info in state.cast_browser.devices.items():
+            cast_list.append({
+                "uuid": str(uuid),
+                "name": cast_info.friendly_name,
+                "model": cast_info.model_name
+            })
+
+    stream_duration = None
+    if state.stream_start_time and state.is_streaming:
+        stream_duration = int(time.time() - state.stream_start_time)
+
+    return {
+        "version": __version__,
+        "streaming": state.is_streaming,
+        "selected_cast": state.selected_cast_uuid,
+        "rms": state.current_rms,
+        "bt_devices": state.bt_devices,
+        "bt_connected": state.bt_connected,
+        "casts": cast_list,
+        "audio_source": state.current_audio_source,
+        "bitrate": state.stream_bitrate,
+        "sample_rate": state.stream_sample_rate,
+        "stream_duration": stream_duration,
+        "stream_start_time": state.stream_start_time,
+        "last_error": state.last_error,
+        "connection_history": state.connection_history,
+        "error_log": state.error_log[-20:] if state.error_log else [],
+        "bt_reconnect_attempts": state.bt_reconnect_attempts
+    }
+
+
+@app.post("/api/stream/start")
+async def api_start_stream():
+    """Manually start the audio stream."""
+    try:
+        if state.is_streaming:
+            return {"status": "already_running", "message": "Stream is already active"}
+
+        start_ffmpeg_stream()
+
+        if state.is_streaming:
+            return {
+                "status": "success",
+                "message": "Stream started successfully",
+                "audio_source": state.current_audio_source,
+                "bitrate": state.stream_bitrate
+            }
+        else:
+            error_msg = "Failed to start stream - check logs for details"
+            return {"status": "error", "message": error_msg}
+    except Exception as e:
+        error_msg = f"Error starting stream: {e}"
+        state.add_error("stream", error_msg)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/stream/stop")
+async def api_stop_stream():
+    """Manually stop the audio stream."""
+    try:
+        stop_ffmpeg_stream()
+        return {"status": "success", "message": "Stream stopped"}
+    except Exception as e:
+        error_msg = f"Error stopping stream: {e}"
+        state.add_error("stream", error_msg)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/stream/restart")
+async def api_restart_stream():
+    """Restart the audio stream with retry logic."""
+    try:
+        logger.info("Restarting audio stream via API")
+        stop_ffmpeg_stream()
+        await asyncio.sleep(1)
+
+        # Retry logic with exponential backoff
+        max_retries = config.get('fallback', 'max_retries', default=3)
+        retry_delay = config.get('fallback', 'retry_delay', default=5)
+
+        for attempt in range(max_retries):
+            start_ffmpeg_stream()
+
+            if state.is_streaming:
+                state.add_connection_event("stream", f"Stream restarted successfully (attempt {attempt + 1})")
+                return {
+                    "status": "success",
+                    "message": f"Stream restarted successfully",
+                    "attempts": attempt + 1,
+                    "audio_source": state.current_audio_source
+                }
+
+            if attempt < max_retries - 1:
+                wait_time = retry_delay * (2 ** attempt)
+                logger.warning(f"Stream start failed, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                await asyncio.sleep(wait_time)
+
+        error_msg = f"Failed to restart stream after {max_retries} attempts"
+        state.add_error("stream", error_msg)
+        return {"status": "error", "message": error_msg}
+
+    except Exception as e:
+        error_msg = f"Error restarting stream: {e}"
+        state.add_error("stream", error_msg)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/bluetooth/reconnect")
+async def api_bluetooth_reconnect():
+    """Attempt to reconnect to Bluetooth audio source."""
+    try:
+        logger.info("Attempting Bluetooth reconnection via API")
+        state.add_connection_event("bluetooth", "Manual reconnection attempt")
+
+        # Check for connected BT device
+        bt_device = await get_connected_bluetooth_device()
+
+        if bt_device:
+            # Restart stream to pick up new BT source
+            stop_ffmpeg_stream()
+            await asyncio.sleep(1)
+            start_ffmpeg_stream()
+
+            return {
+                "status": "success",
+                "message": f"Reconnected to Bluetooth device: {bt_device}",
+                "device": bt_device
+            }
+        else:
+            error_msg = "No Bluetooth device connected"
+            state.add_error("bluetooth", error_msg)
+            return {"status": "error", "message": error_msg}
+
+    except Exception as e:
+        error_msg = f"Error reconnecting Bluetooth: {e}"
+        state.add_error("bluetooth", error_msg)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/errors")
+async def api_get_errors():
+    """Get recent error log."""
+    return {
+        "errors": state.error_log[-50:] if state.error_log else [],
+        "last_error": state.last_error
+    }
+
+
+@app.post("/api/errors/clear")
+async def api_clear_errors():
+    """Clear error log."""
+    state.error_log = []
+    state.last_error = None
+    logger.info("Error log cleared via API")
+    return {"status": "success", "message": "Error log cleared"}
 
 
 @app.websocket("/ws")

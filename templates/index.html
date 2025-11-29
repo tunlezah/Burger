@@ -3,27 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vinyl Streamer Bridge</title>
+    <title>Burger - Audio Bridge</title>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             background-color: #f9fafb;
             min-height: 100vh;
             padding: 1rem;
         }
-        
+
         @media (min-width: 640px) { body { padding: 2rem; } }
-        
-        .container { max-width: 56rem; margin: 0 auto; }
-        
+
+        .container { max-width: 72rem; margin: 0 auto; }
+
         /* Header */
         header { text-align: center; margin-bottom: 2.5rem; }
         h1 { font-size: 2.25rem; font-weight: 800; color: #4338ca; letter-spacing: -0.025em; }
         @media (min-width: 640px) { h1 { font-size: 3rem; } }
         .subtitle { margin-top: 0.5rem; font-size: 1.125rem; color: #6b7280; }
-        
+        .version { margin-top: 0.25rem; font-size: 0.875rem; color: #9ca3af; font-weight: 600; }
+
         /* Status indicators */
         .status-row { margin-top: 1rem; display: flex; justify-content: center; gap: 0.5rem; flex-wrap: wrap; }
         .status-badge {
@@ -36,7 +37,30 @@
         .status-green { background-color: #dcfce7; color: #16a34a; }
         .status-yellow { background-color: #fef9c3; color: #ca8a04; }
         .status-gray { background-color: #f3f4f6; color: #4b5563; }
-        
+        .status-blue { background-color: #dbeafe; color: #2563eb; }
+
+        /* Error Banner */
+        .error-banner {
+            background-color: #fee2e2;
+            border: 1px solid #fecaca;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            display: none;
+        }
+        .error-banner.show { display: block; }
+        .error-banner-title { font-weight: 600; color: #dc2626; margin-bottom: 0.25rem; }
+        .error-banner-message { color: #991b1b; font-size: 0.875rem; }
+        .error-banner-close {
+            float: right;
+            background: none;
+            border: none;
+            color: #dc2626;
+            cursor: pointer;
+            font-size: 1.25rem;
+            font-weight: 700;
+        }
+
         /* Cards */
         .card {
             background: white;
@@ -47,7 +71,8 @@
         }
         .card-indigo { border: 1px solid #e0e7ff; }
         .card-blue { border: 1px solid #dbeafe; }
-        
+        .card-green { border: 1px solid #d1fae5; }
+
         .card-title {
             font-size: 1.5rem;
             font-weight: 700;
@@ -58,12 +83,28 @@
         }
         .card-title-indigo { color: #4f46e5; }
         .card-title-blue { color: #2563eb; }
+        .card-title-green { color: #059669; }
         .card-title svg { width: 1.5rem; height: 1.5rem; }
-        
+
+        /* Info Grid */
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .info-item {
+            background-color: #f9fafb;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+        }
+        .info-label { font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; }
+        .info-value { font-size: 1rem; color: #1f2937; font-weight: 600; margin-top: 0.25rem; }
+
         /* Grid layout */
         .grid { display: grid; gap: 2rem; }
         @media (min-width: 1024px) { .grid { grid-template-columns: 1fr 1fr; } }
-        
+
         /* Audio meter */
         .meter-label { font-size: 1.25rem; font-weight: 600; color: #374151; margin-bottom: 1rem; }
         .meter-bg {
@@ -82,7 +123,7 @@
         .meter-yellow { background-color: #eab308; }
         .meter-red { background-color: #ef4444; }
         .meter-value { margin-top: 0.5rem; font-size: 0.875rem; color: #6b7280; text-align: right; }
-        
+
         /* Device lists */
         .device-list {
             max-height: 16rem;
@@ -95,7 +136,7 @@
         .device-list::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
         .device-list::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
         .device-list::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-        
+
         .device-item {
             padding: 0.75rem;
             border-radius: 0.5rem;
@@ -111,7 +152,7 @@
         .device-item-bt { background-color: #f9fafb; border: 1px solid #e5e7eb; }
         .device-item-bt:hover { background-color: #eff6ff; }
         .device-item-bt-connected { background-color: #dcfce7; border: 1px solid #86efac; }
-        
+
         .device-name { font-weight: 600; color: #1f2937; }
         .device-model { font-size: 0.75rem; color: #6b7280; }
         .device-mac { font-size: 0.75rem; color: #9ca3af; margin-left: 0.5rem; }
@@ -119,9 +160,9 @@
         .device-action-active { font-weight: 700; color: #4338ca; }
         .device-action-connect { font-size: 0.75rem; color: #3b82f6; }
         .device-action-connected { font-size: 0.75rem; font-weight: 600; color: #16a34a; }
-        
+
         .empty-message { color: #9ca3af; text-align: center; padding: 1rem; }
-        
+
         /* Selected cast card */
         .selected-card {
             margin-bottom: 1rem;
@@ -133,7 +174,7 @@
         .selected-card.hidden { display: none; }
         .selected-label { font-size: 0.875rem; font-weight: 500; color: #4338ca; }
         .selected-name { font-size: 1.125rem; font-weight: 600; color: #312e81; }
-        
+
         /* Connected BT card */
         .bt-connected-card {
             margin-bottom: 1rem;
@@ -168,7 +209,7 @@
         }
         .bt-connected-label { font-size: 0.875rem; font-weight: 500; color: #15803d; }
         .bt-connected-name { font-size: 1.125rem; font-weight: 600; color: #14532d; }
-        
+
         /* Not connected message */
         .bt-not-connected {
             margin-bottom: 1rem;
@@ -179,7 +220,7 @@
             color: #6b7280;
         }
         .bt-not-connected.hidden { display: none; }
-        
+
         /* Buttons */
         .btn {
             width: 100%;
@@ -189,14 +230,20 @@
             border: none;
             cursor: pointer;
             transition: background-color 0.15s ease;
-            margin-top: 1rem;
+            margin-top: 0.5rem;
         }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .btn-red { background-color: #ef4444; color: white; }
         .btn-red:hover:not(:disabled) { background-color: #dc2626; }
         .btn-blue { background-color: #3b82f6; color: white; }
         .btn-blue:hover:not(:disabled) { background-color: #2563eb; }
-        
+        .btn-green { background-color: #10b981; color: white; }
+        .btn-green:hover:not(:disabled) { background-color: #059669; }
+        .btn-yellow { background-color: #f59e0b; color: white; }
+        .btn-yellow:hover:not(:disabled) { background-color: #d97706; }
+
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.5rem; }
+
         /* BT devices section */
         .bt-devices-section {
             margin-top: 1rem;
@@ -206,10 +253,24 @@
         .bt-devices-title { font-weight: 500; color: #374151; margin-bottom: 0.5rem; }
         .bt-devices-hint { font-size: 0.75rem; color: #9ca3af; }
         .bt-device-list { max-height: 10rem; }
-        
+
+        /* Connection History */
+        .history-list {
+            max-height: 12rem;
+            overflow-y: auto;
+            font-size: 0.875rem;
+        }
+        .history-item {
+            padding: 0.5rem;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        .history-time { font-size: 0.75rem; color: #9ca3af; }
+        .history-type { font-weight: 600; color: #4338ca; }
+        .history-details { color: #6b7280; }
+
         /* Debug section */
         details {
-            margin-top: 2rem;
+            margin-top: 1rem;
             background: white;
             padding: 1rem;
             border-radius: 0.75rem;
@@ -237,7 +298,7 @@
             max-height: 12rem;
             white-space: pre-wrap;
         }
-        
+
         /* Utility */
         .hidden { display: none !important; }
         .flex-col { display: flex; flex-direction: column; }
@@ -247,14 +308,58 @@
 <body>
     <div class="container">
         <header>
-            <h1>Vinyl Streamer Bridge</h1>
+            <h1>🍔 Burger - Audio Bridge</h1>
             <p class="subtitle">Stream Bluetooth audio to any Chromecast device.</p>
+            <p class="version" id="version-display">Loading version...</p>
             <div class="status-row">
                 <span id="ws-status" class="status-badge status-red">WS Disconnected</span>
                 <span id="stream-status" class="status-badge status-yellow">Stream Off</span>
                 <span id="bt-status" class="status-badge status-gray">BT: Not Connected</span>
             </div>
         </header>
+
+        <!-- Error Banner -->
+        <div id="error-banner" class="error-banner">
+            <button class="error-banner-close" onclick="hideErrorBanner()">×</button>
+            <div class="error-banner-title">⚠️ Error</div>
+            <div id="error-banner-message" class="error-banner-message"></div>
+        </div>
+
+        <!-- Stream Info Card -->
+        <div class="card">
+            <div class="card-title" style="color: #059669;">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                Stream Information
+            </div>
+
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label">Audio Source</div>
+                    <div id="info-source" class="info-value">—</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Stream Duration</div>
+                    <div id="info-duration" class="info-value">—</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Bitrate</div>
+                    <div id="info-bitrate" class="info-value">—</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Sample Rate</div>
+                    <div id="info-samplerate" class="info-value">—</div>
+                </div>
+            </div>
+
+            <!-- Control Buttons -->
+            <div class="btn-group">
+                <button onclick="restartStream()" class="btn btn-yellow">🔄 Restart Stream</button>
+                <button onclick="stopStream()" class="btn btn-red">⏹️ Stop Stream</button>
+            </div>
+            <button onclick="reconnectBluetooth()" class="btn btn-green">🔵 Reconnect Bluetooth</button>
+        </div>
 
         <!-- Audio Meter Section -->
         <div class="card">
@@ -298,7 +403,7 @@
                     </svg>
                     Bluetooth Source
                 </div>
-                
+
                 <div id="bt-connected-card" class="bt-connected-card hidden">
                     <div class="pulse-dot"></div>
                     <div>
@@ -306,7 +411,7 @@
                         <p id="bt-connected-name" class="bt-connected-name"></p>
                     </div>
                 </div>
-                
+
                 <div id="bt-not-connected" class="bt-not-connected">
                     No Bluetooth device connected. Make the bridge discoverable and connect from your phone or audio device.
                 </div>
@@ -323,20 +428,29 @@
                 </div>
             </div>
         </div>
-        
+
+        <!-- Connection History -->
+        <details>
+            <summary>📜 Connection History & Events</summary>
+            <div id="connection-history" class="history-list" style="margin-top: 1rem;">
+                <p class="empty-message">No connection events yet.</p>
+            </div>
+        </details>
+
         <!-- Debug Section -->
         <details>
-            <summary>Debug Info</summary>
+            <summary>🔧 Debug & Diagnostics</summary>
             <div class="debug-buttons">
                 <button onclick="checkAudioSources()" class="btn-debug">Check Audio Sources</button>
                 <button onclick="checkBluetoothAudio()" class="btn-debug">Bluetooth Audio Diag</button>
                 <button onclick="testStream()" class="btn-debug">Test Stream in Browser</button>
-                <button onclick="restartStream()" class="btn-debug">Restart Stream</button>
+                <button onclick="getFullStatus()" class="btn-debug">Full Status</button>
+                <button onclick="clearErrors()" class="btn-debug">Clear Errors</button>
             </div>
             <div style="margin-top: 0.5rem;">
                 <label style="font-size: 0.875rem; color: #4b5563;">Manual source override:</label>
                 <div style="display: flex; gap: 0.5rem; margin-top: 0.25rem;">
-                    <input type="text" id="manual-source" placeholder="e.g. bluez_source.XX_XX_XX_XX_XX_XX.a2dp_source" 
+                    <input type="text" id="manual-source" placeholder="e.g. bluez_source.XX_XX_XX_XX_XX_XX.a2dp_source"
                            style="flex: 1; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.375rem; font-size: 0.875rem;">
                     <button onclick="setManualSource()" class="btn-debug">Set Source</button>
                 </div>
@@ -362,6 +476,16 @@
         var btNotConnected = document.getElementById('bt-not-connected');
         var btConnectedName = document.getElementById('bt-connected-name');
         var debugOutput = document.getElementById('debug-output');
+        var versionDisplay = document.getElementById('version-display');
+        var errorBanner = document.getElementById('error-banner');
+        var errorBannerMessage = document.getElementById('error-banner-message');
+        var connectionHistory = document.getElementById('connection-history');
+
+        // Info fields
+        var infoSource = document.getElementById('info-source');
+        var infoDuration = document.getElementById('info-duration');
+        var infoBitrate = document.getElementById('info-bitrate');
+        var infoSampleRate = document.getElementById('info-samplerate');
 
         var ws;
 
@@ -375,6 +499,8 @@
             ws.onopen = function() {
                 wsStatusEl.className = 'status-badge status-green';
                 wsStatusEl.textContent = 'WS Connected';
+                // Load version on connect
+                loadVersion();
             };
 
             ws.onmessage = function(event) {
@@ -398,7 +524,33 @@
             };
         }
 
+        function loadVersion() {
+            fetch('/api/version')
+                .then(function(response) { return response.json(); })
+                .then(function(data) {
+                    versionDisplay.textContent = 'v' + data.version;
+                })
+                .catch(function(error) {
+                    console.error('Error loading version:', error);
+                });
+        }
+
+        function formatDuration(seconds) {
+            if (!seconds) return '—';
+            var hours = Math.floor(seconds / 3600);
+            var minutes = Math.floor((seconds % 3600) / 60);
+            var secs = seconds % 60;
+            if (hours > 0) {
+                return hours + 'h ' + minutes + 'm ' + secs + 's';
+            } else if (minutes > 0) {
+                return minutes + 'm ' + secs + 's';
+            } else {
+                return secs + 's';
+            }
+        }
+
         function updateUI(data) {
+            // Stream status
             if (data.streaming) {
                 streamStatusEl.className = 'status-badge status-green';
                 streamStatusEl.textContent = 'Stream Active';
@@ -407,6 +559,7 @@
                 streamStatusEl.textContent = 'Stream Off';
             }
 
+            // Bluetooth status
             if (data.bt_connected) {
                 btStatusEl.className = 'status-badge status-green';
                 btStatusEl.textContent = 'BT: ' + data.bt_connected;
@@ -420,6 +573,7 @@
                 btNotConnected.className = 'bt-not-connected';
             }
 
+            // Audio meter
             var rms = data.rms || 0;
             audioMeterEl.style.width = rms + '%';
             rmsValueEl.textContent = rms;
@@ -432,6 +586,32 @@
                 audioMeterEl.className = 'meter-fill meter-green';
             }
 
+            // Stream info
+            infoSource.textContent = data.audio_source || '—';
+            infoBitrate.textContent = data.bitrate || '—';
+            infoSampleRate.textContent = data.sample_rate ? (data.sample_rate + ' Hz') : '—';
+            infoDuration.textContent = formatDuration(data.stream_duration);
+
+            // Error banner
+            if (data.last_error) {
+                showErrorBanner(data.last_error);
+            }
+
+            // Connection history
+            if (data.connection_history && data.connection_history.length > 0) {
+                connectionHistory.innerHTML = '';
+                data.connection_history.slice().reverse().forEach(function(event) {
+                    var item = document.createElement('div');
+                    item.className = 'history-item';
+                    var time = new Date(event.timestamp).toLocaleTimeString();
+                    item.innerHTML = '<div class="history-time">' + time + '</div>' +
+                                   '<div><span class="history-type">' + event.type + ':</span> ' +
+                                   '<span class="history-details">' + event.details + '</span></div>';
+                    connectionHistory.appendChild(item);
+                });
+            }
+
+            // Chromecasts
             castCountEl.textContent = data.casts.length;
             castListEl.innerHTML = '';
 
@@ -446,7 +626,7 @@
                 div.className = 'device-item ' + (isSelected ? 'device-item-selected' : 'device-item-default');
                 div.setAttribute('data-uuid', cast.uuid);
                 div.onclick = function() { selectCast(this.getAttribute('data-uuid')); };
-                
+
                 var infoDiv = document.createElement('div');
                 var nameP = document.createElement('p');
                 nameP.className = 'device-name';
@@ -456,11 +636,11 @@
                 modelP.textContent = cast.model;
                 infoDiv.appendChild(nameP);
                 infoDiv.appendChild(modelP);
-                
+
                 var actionSpan = document.createElement('span');
                 actionSpan.className = 'device-action' + (isSelected ? ' device-action-active' : '');
                 actionSpan.textContent = isSelected ? '● ACTIVE' : '▶ Stream';
-                
+
                 div.appendChild(infoDiv);
                 div.appendChild(actionSpan);
                 castListEl.appendChild(div);
@@ -473,7 +653,7 @@
                     break;
                 }
             }
-            
+
             if (activeCast) {
                 selectedCastCardEl.className = 'selected-card';
                 selectedCastNameEl.textContent = activeCast.name;
@@ -484,11 +664,12 @@
                 stopCastingBtn.disabled = true;
             }
 
+            // Bluetooth devices
             btListEl.innerHTML = '';
             if (data.bt_devices.length === 0) {
                 btListEl.innerHTML = '<p class="empty-message">No devices discovered yet.</p>';
             }
-            
+
             for (var k = 0; k < data.bt_devices.length; k++) {
                 var device = data.bt_devices[k];
                 var isConnected = data.bt_connected && data.bt_connected.indexOf(device.name) !== -1;
@@ -496,10 +677,10 @@
                 btDiv.className = 'device-item ' + (isConnected ? 'device-item-bt-connected' : 'device-item-bt');
                 btDiv.setAttribute('data-mac', device.mac);
                 btDiv.setAttribute('data-name', device.name);
-                btDiv.onclick = function() { 
-                    connectBtDevice(this.getAttribute('data-mac'), this.getAttribute('data-name')); 
+                btDiv.onclick = function() {
+                    connectBtDevice(this.getAttribute('data-mac'), this.getAttribute('data-name'));
                 };
-                
+
                 var btInfoDiv = document.createElement('div');
                 var btNameSpan = document.createElement('span');
                 btNameSpan.className = 'device-name';
@@ -509,15 +690,24 @@
                 macSpan.textContent = device.mac;
                 btInfoDiv.appendChild(btNameSpan);
                 btInfoDiv.appendChild(macSpan);
-                
+
                 var btActionSpan = document.createElement('span');
                 btActionSpan.className = isConnected ? 'device-action-connected' : 'device-action-connect';
                 btActionSpan.textContent = isConnected ? '● Connected' : 'Connect →';
-                
+
                 btDiv.appendChild(btInfoDiv);
                 btDiv.appendChild(btActionSpan);
                 btListEl.appendChild(btDiv);
             }
+        }
+
+        function showErrorBanner(message) {
+            errorBannerMessage.textContent = message;
+            errorBanner.className = 'error-banner show';
+        }
+
+        function hideErrorBanner() {
+            errorBanner.className = 'error-banner';
         }
 
         function selectCast(uuid) {
@@ -537,7 +727,7 @@
                 })
                 .catch(function(error) {
                     console.error('Cast error:', error);
-                    alert('Error: ' + error.message);
+                    showErrorBanner('Failed to start casting: ' + error.message);
                     debugOutput.textContent = 'Cast error: ' + error.message;
                 });
         }
@@ -550,7 +740,7 @@
                     }
                 })
                 .catch(function(error) {
-                    alert('Error: ' + error.message);
+                    showErrorBanner('Error: ' + error.message);
                 });
         }
 
@@ -566,7 +756,7 @@
                     }
                 })
                 .catch(function(error) {
-                    alert('Error: ' + error.message);
+                    showErrorBanner('Error: ' + error.message);
                 })
                 .finally(function() {
                     setTimeout(function() {
@@ -575,37 +765,82 @@
                     }, 15500);
                 });
         }
-        
+
         function connectBtDevice(mac, name) {
             if (!confirm('Connect to "' + name + '"?\n\nThis will pair (if needed) and connect to the device.')) {
                 return;
             }
-            
+
             debugOutput.textContent = 'Connecting to ' + name + ' (' + mac + ')...';
-            
+
             fetch('/api/bt/pair/' + mac, { method: 'POST' })
                 .then(function(response) {
                     return response.json();
                 })
                 .then(function(result) {
                     debugOutput.textContent = JSON.stringify(result, null, 2);
-                    
+
                     if (result.status === 'connected') {
                         btListEl.innerHTML = '<p class="empty-message" style="color: #22c55e; font-weight: 600;">Connected to ' + name + '!</p>';
                     } else if (result.status === 'paired') {
-                        alert('Paired with ' + name + ', but you may need to initiate connection from the device.');
+                        showErrorBanner('Paired with ' + name + ', but you may need to initiate connection from the device.');
                     } else if (result.status === 'timeout') {
-                        alert('Connection timed out. Make sure ' + name + ' is in pairing mode and try again.');
+                        showErrorBanner('Connection timed out. Make sure ' + name + ' is in pairing mode and try again.');
                     } else {
-                        alert('Connection issue: ' + (result.message || 'Unknown error'));
+                        showErrorBanner('Connection issue: ' + (result.message || 'Unknown error'));
                     }
                 })
                 .catch(function(error) {
-                    alert('Error: ' + error.message);
+                    showErrorBanner('Error: ' + error.message);
                     debugOutput.textContent = 'Connection error: ' + error.message;
                 });
         }
-        
+
+        function restartStream() {
+            debugOutput.textContent = 'Restarting stream...';
+            fetch('/api/stream/restart', { method: 'POST' })
+                .then(function(response) { return response.json(); })
+                .then(function(data) {
+                    debugOutput.textContent = JSON.stringify(data, null, 2);
+                    if (data.status === 'success') {
+                        hideErrorBanner();
+                    } else {
+                        showErrorBanner(data.message || 'Failed to restart stream');
+                    }
+                })
+                .catch(function(error) {
+                    showErrorBanner('Error: ' + error.message);
+                });
+        }
+
+        function stopStream() {
+            fetch('/api/stream/stop', { method: 'POST' })
+                .then(function(response) { return response.json(); })
+                .then(function(data) {
+                    debugOutput.textContent = JSON.stringify(data, null, 2);
+                })
+                .catch(function(error) {
+                    showErrorBanner('Error: ' + error.message);
+                });
+        }
+
+        function reconnectBluetooth() {
+            debugOutput.textContent = 'Reconnecting Bluetooth...';
+            fetch('/api/bluetooth/reconnect', { method: 'POST' })
+                .then(function(response) { return response.json(); })
+                .then(function(data) {
+                    debugOutput.textContent = JSON.stringify(data, null, 2);
+                    if (data.status === 'success') {
+                        hideErrorBanner();
+                    } else {
+                        showErrorBanner(data.message || 'Failed to reconnect');
+                    }
+                })
+                .catch(function(error) {
+                    showErrorBanner('Error: ' + error.message);
+                });
+        }
+
         function checkAudioSources() {
             debugOutput.textContent = 'Fetching audio sources...';
             fetch('/api/audio-sources')
@@ -619,7 +854,7 @@
                     debugOutput.textContent = 'Error: ' + error.message;
                 });
         }
-        
+
         function checkBluetoothAudio() {
             debugOutput.textContent = 'Running Bluetooth audio diagnostics...';
             fetch('/api/debug/bluetooth-audio')
@@ -633,7 +868,31 @@
                     debugOutput.textContent = 'Error: ' + error.message;
                 });
         }
-        
+
+        function getFullStatus() {
+            debugOutput.textContent = 'Fetching full status...';
+            fetch('/api/status/full')
+                .then(function(response) { return response.json(); })
+                .then(function(data) {
+                    debugOutput.textContent = JSON.stringify(data, null, 2);
+                })
+                .catch(function(error) {
+                    debugOutput.textContent = 'Error: ' + error.message;
+                });
+        }
+
+        function clearErrors() {
+            fetch('/api/errors/clear', { method: 'POST' })
+                .then(function(response) { return response.json(); })
+                .then(function(data) {
+                    hideErrorBanner();
+                    debugOutput.textContent = 'Errors cleared';
+                })
+                .catch(function(error) {
+                    debugOutput.textContent = 'Error: ' + error.message;
+                });
+        }
+
         function testStream() {
             debugOutput.textContent = 'Starting audio playback test...';
             var audio = new Audio('/live.mp3');
@@ -649,26 +908,12 @@
                 debugOutput.textContent = 'Audio play error: ' + err.message;
             });
         }
-        
-        function restartStream() {
-            debugOutput.textContent = 'Restarting audio stream...';
-            fetch('/api/debug/restart-stream')
-                .then(function(response) {
-                    return response.json();
-                })
-                .then(function(data) {
-                    debugOutput.textContent = 'Stream restarted:\n' + JSON.stringify(data, null, 2);
-                })
-                .catch(function(error) {
-                    debugOutput.textContent = 'Error: ' + error.message;
-                });
-        }
-        
+
         function setManualSource() {
             var sourceInput = document.getElementById('manual-source');
             var sourceName = sourceInput.value.trim();
             if (!sourceName) {
-                alert('Please enter a source name');
+                showErrorBanner('Please enter a source name');
                 return;
             }
             debugOutput.textContent = 'Setting audio source to: ' + sourceName;

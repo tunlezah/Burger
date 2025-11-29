@@ -1,0 +1,38 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "stream_endpoint": "/live.mp3"
+  },
+  "audio": {
+    "bitrate": "192k",
+    "sample_rate": 44100,
+    "channels": 2,
+    "format": "mp3",
+    "buffer_size": 4096
+  },
+  "chromecast": {
+    "auto_discover": true,
+    "discovery_timeout": 10,
+    "default_device": null,
+    "reconnect_on_failure": true,
+    "reconnect_delay": 5
+  },
+  "bluetooth": {
+    "auto_reconnect": true,
+    "reconnect_interval": 10,
+    "scan_timeout": 15,
+    "preferred_source": null
+  },
+  "streaming": {
+    "auto_start": false,
+    "enable_rms_meter": true,
+    "status_update_interval": 2
+  },
+  "fallback": {
+    "use_default_audio_source": true,
+    "retry_on_stream_failure": true,
+    "max_retries": 3,
+    "retry_delay": 5
+  }
+}
