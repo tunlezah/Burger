@@ -394,10 +394,10 @@ check_vinyl_streamer_service() {
 
 check_ffmpeg() {
     print_section "FFmpeg Check"
-    
+
     if command -v ffmpeg &>/dev/null; then
         print_ok "FFmpeg is installed"
-        
+
         # Check if it has pulse support
         if ffmpeg -devices 2>&1 | grep -q pulse; then
             print_ok "FFmpeg has PulseAudio/PipeWire support"
@@ -407,6 +407,188 @@ check_ffmpeg() {
     else
         print_fail "FFmpeg is NOT installed"
         print_action "Fix: sudo apt install ffmpeg"
+    fi
+}
+
+check_config_files() {
+    print_section "Configuration Files Check (v2.0.x)"
+
+    local app_dir="/opt/vinyl-streamer"
+
+    # Check for v2.0.0+ required files
+    if [ -f "$app_dir/version.py" ]; then
+        print_ok "version.py exists"
+        # Try to extract version
+        local version=$(grep -oP '__version__\s*=\s*"\K[^"]+' "$app_dir/version.py" 2>/dev/null)
+        if [ -n "$version" ]; then
+            print_info "Current version: $version"
+        fi
+    else
+        print_fail "version.py NOT found (required for v2.0.0+)"
+        print_action "Fix: Copy version.py to $app_dir/"
+    fi
+
+    if [ -f "$app_dir/config_manager.py" ]; then
+        print_ok "config_manager.py exists"
+    else
+        print_fail "config_manager.py NOT found (required for v2.0.0+)"
+        print_action "Fix: Copy config_manager.py to $app_dir/"
+    fi
+
+    if [ -f "$app_dir/config.json" ]; then
+        print_ok "config.json exists"
+        # Validate JSON syntax
+        if python3 -m json.tool "$app_dir/config.json" >/dev/null 2>&1; then
+            print_ok "config.json is valid JSON"
+        else
+            print_fail "config.json has invalid JSON syntax"
+            print_action "Fix: Check JSON syntax in $app_dir/config.json"
+        fi
+    else
+        print_warn "config.json NOT found (will use defaults)"
+        print_action "Recommendation: Copy config.json to $app_dir/ for customization"
+    fi
+
+    # Check template file
+    if [ -f "$app_dir/templates/index.html" ]; then
+        print_ok "Web UI template (index.html) exists"
+    else
+        print_fail "Web UI template NOT found"
+        print_action "Fix: Copy templates/index.html to $app_dir/templates/"
+    fi
+}
+
+check_python_environment() {
+    print_section "Python Environment Check"
+
+    local venv_dir="/opt/vinyl-streamer/venv"
+
+    if [ -d "$venv_dir" ]; then
+        print_ok "Virtual environment directory exists"
+
+        # Check if pip is working
+        if [ -x "$venv_dir/bin/pip" ]; then
+            print_ok "pip is available in venv"
+
+            # Check for required packages
+            local required_pkgs=("fastapi" "uvicorn" "pychromecast" "zeroconf")
+            for pkg in "${required_pkgs[@]}"; do
+                if "$venv_dir/bin/pip" show "$pkg" &>/dev/null; then
+                    print_ok "  Python package '$pkg' is installed"
+                else
+                    print_fail "  Python package '$pkg' is MISSING"
+                    print_action "  Fix: sudo -u $SERVICE_USER $venv_dir/bin/pip install $pkg"
+                fi
+            done
+        else
+            print_fail "pip not found in venv"
+            print_action "Fix: Recreate venv: python3 -m venv $venv_dir"
+        fi
+    else
+        print_fail "Virtual environment NOT found at $venv_dir"
+        print_action "Fix: Run install.sh again to set up the environment"
+    fi
+}
+
+check_network_accessibility() {
+    print_section "Network & Port Accessibility Check"
+
+    # Check if port 8000 is listening
+    if ss -tuln 2>/dev/null | grep -q ':8000 '; then
+        print_ok "Port 8000 is listening"
+
+        # Check if it's accessible locally
+        if curl -s --connect-timeout 2 http://localhost:8000/ >/dev/null 2>&1; then
+            print_ok "Web server is responding on localhost"
+        else
+            print_warn "Port is listening but not responding to HTTP requests"
+        fi
+    else
+        print_warn "Port 8000 is NOT listening"
+        print_action "Check: Is vinyl-streamer service running?"
+    fi
+
+    # Check firewall
+    if command -v ufw &>/dev/null && sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+        if sudo ufw status | grep -q "8000.*ALLOW"; then
+            print_ok "UFW firewall allows port 8000"
+        else
+            print_warn "UFW is active but port 8000 may not be allowed"
+            print_action "Fix: sudo ufw allow 8000/tcp"
+        fi
+    else
+        print_info "UFW firewall not active or not installed"
+    fi
+
+    # Get and display local IP for access
+    local ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    if [ -n "$ip" ]; then
+        print_info "Access web UI at: http://$ip:8000"
+    fi
+}
+
+check_chromecast_discovery() {
+    print_section "Chromecast/Zeroconf Discovery Check"
+
+    # Check if avahi-daemon is running
+    if systemctl is-active --quiet avahi-daemon; then
+        print_ok "Avahi daemon is running"
+    else
+        print_fail "Avahi daemon is NOT running (required for Chromecast discovery)"
+        print_action "Fix: sudo systemctl start avahi-daemon"
+        return 1
+    fi
+
+    # Check for Chromecast devices using avahi-browse (if available)
+    if command -v avahi-browse &>/dev/null; then
+        print_info "Scanning for Chromecast devices (5 second timeout)..."
+        local chromecasts=$(timeout 5 avahi-browse -t _googlecast._tcp 2>/dev/null | grep -v "^+" | grep "=.*IPv4" || true)
+
+        if [ -n "$chromecasts" ]; then
+            print_ok "Chromecast device(s) found on network:"
+            echo "$chromecasts" | while read line; do
+                echo "       $line"
+            done
+        else
+            print_warn "No Chromecast devices found"
+            print_info "This could mean:"
+            echo "       1. No Chromecast devices on the network"
+            echo "       2. Network isolation/VLAN preventing discovery"
+            echo "       3. mDNS/multicast blocked by firewall"
+        fi
+    else
+        print_info "avahi-browse not available for scanning"
+        print_action "Install: sudo apt install avahi-utils"
+    fi
+}
+
+check_v2_api_endpoints() {
+    print_section "v2.0.x API Endpoints Check"
+
+    # Check if service is responding
+    if ! curl -s --connect-timeout 2 http://localhost:8000/api/version >/dev/null 2>&1; then
+        print_warn "Cannot reach API endpoints (service may not be running)"
+        return 1
+    fi
+
+    # Check v2.0.0+ endpoints
+    local endpoints=("/api/version" "/api/config" "/api/status/full" "/api/errors")
+
+    for endpoint in "${endpoints[@]}"; do
+        if curl -s --connect-timeout 2 http://localhost:8000$endpoint >/dev/null 2>&1; then
+            print_ok "Endpoint $endpoint is accessible"
+        else
+            print_fail "Endpoint $endpoint is NOT accessible"
+        fi
+    done
+
+    # Try to get version info
+    local version_info=$(curl -s --connect-timeout 2 http://localhost:8000/api/version 2>/dev/null)
+    if [ -n "$version_info" ]; then
+        local version=$(echo "$version_info" | python3 -c "import sys,json; print(json.load(sys.stdin).get('version','unknown'))" 2>/dev/null)
+        if [ -n "$version" ]; then
+            print_info "API reports version: $version"
+        fi
     fi
 }
 
@@ -511,9 +693,11 @@ main() {
     echo "Chromecast audio streaming setup."
     echo ""
     echo "Service user: $SERVICE_USER"
-    
+
     # Run all checks
     check_service_user
+    check_config_files
+    check_python_environment
     check_competing_audio_servers
     check_pipewire_bluetooth
     check_bluetooth_status
@@ -522,6 +706,9 @@ main() {
     check_pipewire_bluetooth_source
     check_vinyl_streamer_service
     check_ffmpeg
+    check_network_accessibility
+    check_chromecast_discovery
+    check_v2_api_endpoints
     
     print_header "Summary & Recommendations"
     

@@ -3,7 +3,7 @@ Burger - Bluetooth Audio to Chromecast Bridge
 Version Management Module
 """
 
-__version__ = "2.0.2"
+__version__ = "2.0.3"
 __app_name__ = "Burger - Audio Bridge"
 __description__ = "Stream Bluetooth audio to any Chromecast device"
 
