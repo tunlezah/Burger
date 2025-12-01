@@ -105,25 +105,6 @@
         .grid { display: grid; gap: 2rem; }
         @media (min-width: 1024px) { .grid { grid-template-columns: 1fr 1fr; } }
 
-        /* Audio meter */
-        .meter-label { font-size: 1.25rem; font-weight: 600; color: #374151; margin-bottom: 1rem; }
-        .meter-bg {
-            width: 100%;
-            background-color: #e5e7eb;
-            border-radius: 9999px;
-            height: 1rem;
-            overflow: hidden;
-        }
-        .meter-fill {
-            height: 1rem;
-            border-radius: 9999px;
-            transition: width 0.1s ease, background-color 0.1s ease;
-        }
-        .meter-green { background-color: #22c55e; }
-        .meter-yellow { background-color: #eab308; }
-        .meter-red { background-color: #ef4444; }
-        .meter-value { margin-top: 0.5rem; font-size: 0.875rem; color: #6b7280; text-align: right; }
-
         /* Device lists */
         .device-list {
             max-height: 16rem;
@@ -310,7 +291,7 @@
         <header>
             <h1>🍔 Burger - Audio Bridge</h1>
             <p class="subtitle">Stream Bluetooth audio to any Chromecast device.</p>
-            <p class="version" id="version-display">Loading version...</p>
+            <p class="version" id="version-display">v2.0.1</p>
             <div class="status-row">
                 <span id="ws-status" class="status-badge status-red">WS Disconnected</span>
                 <span id="stream-status" class="status-badge status-yellow">Stream Off</span>
@@ -320,12 +301,71 @@
 
         <!-- Error Banner -->
         <div id="error-banner" class="error-banner">
-            <button class="error-banner-close" onclick="hideErrorBanner()">×</button>
+            <button class="error-banner-close" onclick="dismissError()">×</button>
             <div class="error-banner-title">⚠️ Error</div>
             <div id="error-banner-message" class="error-banner-message"></div>
         </div>
 
-        <!-- Stream Info Card -->
+        <!-- Devices Grid - Bluetooth on LEFT, Chromecast on RIGHT -->
+        <div class="grid">
+            <!-- Bluetooth Section (NOW ON LEFT) -->
+            <div class="card card-blue flex-col">
+                <div class="card-title card-title-blue">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
+                    </svg>
+                    Bluetooth Source
+                </div>
+
+                <div id="bt-connected-card" class="bt-connected-card hidden">
+                    <div class="pulse-dot"></div>
+                    <div>
+                        <p class="bt-connected-label">Connected Device:</p>
+                        <p id="bt-connected-name" class="bt-connected-name"></p>
+                    </div>
+                </div>
+
+                <div id="bt-not-connected" class="bt-not-connected">
+                    No Bluetooth device connected. Make the bridge discoverable and connect from your phone or audio device.
+                </div>
+
+                <button id="scan-bt-btn" onclick="setPairMode()" class="btn btn-blue">
+                    Make Bridge Discoverable (15s)
+                </button>
+
+                <div class="bt-devices-section">
+                    <div class="bt-devices-title">Known BT Devices: <span class="bt-devices-hint">(click to connect)</span></div>
+                    <div id="bt-list" class="device-list bt-device-list">
+                        <p class="empty-message">Press 'Make Discoverable' to scan.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chromecast Section (NOW ON RIGHT) -->
+            <div class="card card-indigo flex-col">
+                <div class="card-title card-title-indigo">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                    Available Chromecasts (<span id="cast-count">0</span>)
+                </div>
+
+                <div id="selected-cast-card" class="selected-card hidden">
+                    <p class="selected-label">Casting to:</p>
+                    <p id="selected-cast-name" class="selected-name"></p>
+                </div>
+
+                <div id="cast-list" class="device-list flex-grow">
+                    <p class="empty-message">Scanning for devices...</p>
+                </div>
+
+                <button id="stop-casting-btn" onclick="stopCasting()" class="btn btn-red" disabled>
+                    Stop Casting
+                </button>
+            </div>
+        </div>
+
+        <!-- Stream Info Card (MOVED BELOW THE GRID) -->
         <div class="card">
             <div class="card-title" style="color: #059669;">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -359,74 +399,6 @@
                 <button onclick="stopStream()" class="btn btn-red">⏹️ Stop Stream</button>
             </div>
             <button onclick="reconnectBluetooth()" class="btn btn-green">🔵 Reconnect Bluetooth</button>
-        </div>
-
-        <!-- Audio Meter Section -->
-        <div class="card">
-            <div class="meter-label">Live Audio Level (RMS)</div>
-            <div class="meter-bg">
-                <div id="audio-meter" class="meter-fill meter-green" style="width: 0%;"></div>
-            </div>
-            <p class="meter-value"><span id="rms-value">0</span>%</p>
-        </div>
-
-        <!-- Devices Grid -->
-        <div class="grid">
-            <!-- Chromecast Section -->
-            <div class="card card-indigo flex-col">
-                <div class="card-title card-title-indigo">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                    </svg>
-                    Available Chromecasts (<span id="cast-count">0</span>)
-                </div>
-
-                <div id="selected-cast-card" class="selected-card hidden">
-                    <p class="selected-label">Casting to:</p>
-                    <p id="selected-cast-name" class="selected-name"></p>
-                </div>
-
-                <div id="cast-list" class="device-list flex-grow">
-                    <p class="empty-message">Scanning for devices...</p>
-                </div>
-
-                <button id="stop-casting-btn" onclick="stopCasting()" class="btn btn-red" disabled>
-                    Stop Casting
-                </button>
-            </div>
-
-            <!-- Bluetooth Section -->
-            <div class="card card-blue flex-col">
-                <div class="card-title card-title-blue">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
-                    </svg>
-                    Bluetooth Source
-                </div>
-
-                <div id="bt-connected-card" class="bt-connected-card hidden">
-                    <div class="pulse-dot"></div>
-                    <div>
-                        <p class="bt-connected-label">Connected Device:</p>
-                        <p id="bt-connected-name" class="bt-connected-name"></p>
-                    </div>
-                </div>
-
-                <div id="bt-not-connected" class="bt-not-connected">
-                    No Bluetooth device connected. Make the bridge discoverable and connect from your phone or audio device.
-                </div>
-
-                <button id="scan-bt-btn" onclick="setPairMode()" class="btn btn-blue">
-                    Make Bridge Discoverable (15s)
-                </button>
-
-                <div class="bt-devices-section">
-                    <div class="bt-devices-title">Known BT Devices: <span class="bt-devices-hint">(click to connect)</span></div>
-                    <div id="bt-list" class="device-list bt-device-list">
-                        <p class="empty-message">Press 'Make Discoverable' to scan.</p>
-                    </div>
-                </div>
-            </div>
         </div>
 
         <!-- Connection History -->
@@ -463,8 +435,6 @@
         var wsStatusEl = document.getElementById('ws-status');
         var streamStatusEl = document.getElementById('stream-status');
         var btStatusEl = document.getElementById('bt-status');
-        var audioMeterEl = document.getElementById('audio-meter');
-        var rmsValueEl = document.getElementById('rms-value');
         var castListEl = document.getElementById('cast-list');
         var btListEl = document.getElementById('bt-list');
         var castCountEl = document.getElementById('cast-count');
@@ -488,6 +458,8 @@
         var infoSampleRate = document.getElementById('info-samplerate');
 
         var ws;
+        var errorDismissed = false; // Track if user dismissed the error
+        var lastErrorMessage = null; // Track last error to avoid re-showing same error
 
         function connectWebSocket() {
             var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -499,8 +471,9 @@
             ws.onopen = function() {
                 wsStatusEl.className = 'status-badge status-green';
                 wsStatusEl.textContent = 'WS Connected';
-                // Load version on connect
+                // Load version and initial status on connect
                 loadVersion();
+                loadInitialStatus();
             };
 
             ws.onmessage = function(event) {
@@ -532,6 +505,18 @@
                 })
                 .catch(function(error) {
                     console.error('Error loading version:', error);
+                });
+        }
+
+        function loadInitialStatus() {
+            // Load full status on page load to populate chromecast list immediately
+            fetch('/api/status/full')
+                .then(function(response) { return response.json(); })
+                .then(function(data) {
+                    updateUI(data);
+                })
+                .catch(function(error) {
+                    console.error('Error loading initial status:', error);
                 });
         }
 
@@ -573,28 +558,25 @@
                 btNotConnected.className = 'bt-not-connected';
             }
 
-            // Audio meter
-            var rms = data.rms || 0;
-            audioMeterEl.style.width = rms + '%';
-            rmsValueEl.textContent = rms;
-
-            if (rms > 85) {
-                audioMeterEl.className = 'meter-fill meter-red';
-            } else if (rms > 60) {
-                audioMeterEl.className = 'meter-fill meter-yellow';
-            } else {
-                audioMeterEl.className = 'meter-fill meter-green';
-            }
-
             // Stream info
             infoSource.textContent = data.audio_source || '—';
             infoBitrate.textContent = data.bitrate || '—';
             infoSampleRate.textContent = data.sample_rate ? (data.sample_rate + ' Hz') : '—';
             infoDuration.textContent = formatDuration(data.stream_duration);
 
-            // Error banner
-            if (data.last_error) {
+            // Error banner - only show if error changed and user hasn't dismissed it
+            if (data.last_error && data.last_error !== lastErrorMessage) {
+                errorDismissed = false;
+                lastErrorMessage = data.last_error;
+            }
+
+            if (data.last_error && !errorDismissed) {
                 showErrorBanner(data.last_error);
+            } else if (!data.last_error) {
+                // Clear error if resolved
+                hideErrorBanner();
+                errorDismissed = false;
+                lastErrorMessage = null;
             }
 
             // Connection history
@@ -710,6 +692,11 @@
             errorBanner.className = 'error-banner';
         }
 
+        function dismissError() {
+            errorDismissed = true;
+            hideErrorBanner();
+        }
+
         function selectCast(uuid) {
             castListEl.innerHTML = '<p class="empty-message" style="color: #6366f1; font-weight: 600;">Initiating cast... This may take a few seconds.</p>';
             var encodedUuid = encodeURIComponent(uuid);
@@ -727,6 +714,7 @@
                 })
                 .catch(function(error) {
                     console.error('Cast error:', error);
+                    errorDismissed = false;
                     showErrorBanner('Failed to start casting: ' + error.message);
                     debugOutput.textContent = 'Cast error: ' + error.message;
                 });
@@ -740,6 +728,7 @@
                     }
                 })
                 .catch(function(error) {
+                    errorDismissed = false;
                     showErrorBanner('Error: ' + error.message);
                 });
         }
@@ -756,6 +745,7 @@
                     }
                 })
                 .catch(function(error) {
+                    errorDismissed = false;
                     showErrorBanner('Error: ' + error.message);
                 })
                 .finally(function() {
@@ -782,15 +772,21 @@
 
                     if (result.status === 'connected') {
                         btListEl.innerHTML = '<p class="empty-message" style="color: #22c55e; font-weight: 600;">Connected to ' + name + '!</p>';
+                        errorDismissed = false;
+                        hideErrorBanner();
                     } else if (result.status === 'paired') {
+                        errorDismissed = false;
                         showErrorBanner('Paired with ' + name + ', but you may need to initiate connection from the device.');
                     } else if (result.status === 'timeout') {
+                        errorDismissed = false;
                         showErrorBanner('Connection timed out. Make sure ' + name + ' is in pairing mode and try again.');
                     } else {
+                        errorDismissed = false;
                         showErrorBanner('Connection issue: ' + (result.message || 'Unknown error'));
                     }
                 })
                 .catch(function(error) {
+                    errorDismissed = false;
                     showErrorBanner('Error: ' + error.message);
                     debugOutput.textContent = 'Connection error: ' + error.message;
                 });
@@ -803,12 +799,15 @@
                 .then(function(data) {
                     debugOutput.textContent = JSON.stringify(data, null, 2);
                     if (data.status === 'success') {
+                        errorDismissed = false;
                         hideErrorBanner();
                     } else {
+                        errorDismissed = false;
                         showErrorBanner(data.message || 'Failed to restart stream');
                     }
                 })
                 .catch(function(error) {
+                    errorDismissed = false;
                     showErrorBanner('Error: ' + error.message);
                 });
         }
@@ -820,6 +819,7 @@
                     debugOutput.textContent = JSON.stringify(data, null, 2);
                 })
                 .catch(function(error) {
+                    errorDismissed = false;
                     showErrorBanner('Error: ' + error.message);
                 });
         }
@@ -831,12 +831,15 @@
                 .then(function(data) {
                     debugOutput.textContent = JSON.stringify(data, null, 2);
                     if (data.status === 'success') {
+                        errorDismissed = false;
                         hideErrorBanner();
                     } else {
+                        errorDismissed = false;
                         showErrorBanner(data.message || 'Failed to reconnect');
                     }
                 })
                 .catch(function(error) {
+                    errorDismissed = false;
                     showErrorBanner('Error: ' + error.message);
                 });
         }
@@ -885,7 +888,9 @@
             fetch('/api/errors/clear', { method: 'POST' })
                 .then(function(response) { return response.json(); })
                 .then(function(data) {
+                    errorDismissed = false;
                     hideErrorBanner();
+                    lastErrorMessage = null;
                     debugOutput.textContent = 'Errors cleared';
                 })
                 .catch(function(error) {
@@ -913,6 +918,7 @@
             var sourceInput = document.getElementById('manual-source');
             var sourceName = sourceInput.value.trim();
             if (!sourceName) {
+                errorDismissed = false;
                 showErrorBanner('Please enter a source name');
                 return;
             }

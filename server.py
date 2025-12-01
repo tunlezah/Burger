@@ -100,43 +100,69 @@ def get_local_ip():
 
 
 async def get_connected_bluetooth_device() -> Optional[str]:
-    """Check for currently connected Bluetooth audio device."""
+    """Check for currently connected Bluetooth audio device with improved robustness."""
     try:
-        # Method 1: Check bluetoothctl for connected devices
+        # Method 1: Check bluetoothctl devices with Connected status
         proc = await asyncio.create_subprocess_shell(
-            "bluetoothctl info 2>/dev/null | grep -E '(Name|Connected)' || true",
+            "bluetoothctl devices Connected 2>/dev/null | head -1 || true",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL
         )
-        stdout, _ = await proc.communicate()
-        output = stdout.decode()
-        
-        if "Connected: yes" in output:
-            name_match = re.search(r"Name:\s*(.+)", output)
-            if name_match:
-                return name_match.group(1).strip()
-        
-        # Method 2: Check PipeWire/PulseAudio for Bluetooth sources
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+        connected_output = stdout.decode().strip()
+
+        if connected_output:
+            # Extract device name from "Device XX:XX:XX:XX:XX:XX DeviceName"
+            parts = connected_output.split(None, 2)
+            if len(parts) >= 3:
+                device_name = parts[2]
+                logger.debug(f"Found connected Bluetooth device via bluetoothctl: {device_name}")
+                return device_name
+
+        # Method 2: Check bluetoothctl info for any connected device
         proc2 = await asyncio.create_subprocess_shell(
-            "pactl list sources short 2>/dev/null | grep -i 'bluez' || true",
+            "bluetoothctl info 2>/dev/null || true",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL
         )
-        stdout2, _ = await proc2.communicate()
-        
-        if stdout2.decode().strip():
-            # Extract device name from bluez source
-            proc3 = await asyncio.create_subprocess_shell(
+        stdout2, _ = await asyncio.wait_for(proc2.communicate(), timeout=5)
+        info_output = stdout2.decode()
+
+        if "Connected: yes" in info_output:
+            name_match = re.search(r"Name:\s*(.+)", info_output)
+            if name_match:
+                device_name = name_match.group(1).strip()
+                logger.debug(f"Found connected Bluetooth device via info: {device_name}")
+                return device_name
+
+        # Method 3: Check PipeWire/PulseAudio for active Bluetooth sources
+        proc3 = await asyncio.create_subprocess_shell(
+            "pactl list sources short 2>/dev/null | grep -i 'bluez' | grep -i 'RUNNING\\|IDLE' || true",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL
+        )
+        stdout3, _ = await asyncio.wait_for(proc3.communicate(), timeout=5)
+
+        if stdout3.decode().strip():
+            # Extract device description from detailed source info
+            proc4 = await asyncio.create_subprocess_shell(
                 "pactl list sources 2>/dev/null | grep -A 30 'bluez' | grep 'device.description' | head -1 || true",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL
             )
-            stdout3, _ = await proc3.communicate()
-            desc_match = re.search(r'device\.description\s*=\s*"([^"]+)"', stdout3.decode())
+            stdout4, _ = await asyncio.wait_for(proc4.communicate(), timeout=5)
+            desc_match = re.search(r'device\.description\s*=\s*"([^"]+)"', stdout4.decode())
             if desc_match:
-                return desc_match.group(1)
+                device_name = desc_match.group(1)
+                logger.debug(f"Found Bluetooth device via PulseAudio: {device_name}")
+                return device_name
             return "Bluetooth Device"
-        
+
+        logger.debug("No connected Bluetooth device found")
+        return None
+
+    except asyncio.TimeoutError:
+        logger.warning("Timeout while checking Bluetooth connection")
         return None
     except Exception as e:
         logger.error(f"Error checking Bluetooth connection: {e}")
