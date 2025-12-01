@@ -40,7 +40,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$SCRIPT_DIR/server.py" ]; then
     echo ">>> Copying application files..."
     sudo cp "$SCRIPT_DIR/server.py" $APP_DIR/
-    
+
+    # Copy v2.0.0 modules
+    if [ -f "$SCRIPT_DIR/version.py" ]; then
+        sudo cp "$SCRIPT_DIR/version.py" $APP_DIR/
+    fi
+    if [ -f "$SCRIPT_DIR/config_manager.py" ]; then
+        sudo cp "$SCRIPT_DIR/config_manager.py" $APP_DIR/
+    fi
+    if [ -f "$SCRIPT_DIR/config.json" ]; then
+        sudo cp "$SCRIPT_DIR/config.json" $APP_DIR/
+    fi
+
     # Handle index.html - check multiple locations
     if [ -f "$SCRIPT_DIR/templates/index.html" ]; then
         sudo cp "$SCRIPT_DIR/templates/index.html" $APP_DIR/templates/
@@ -49,7 +60,7 @@ if [ -f "$SCRIPT_DIR/server.py" ]; then
     else
         echo "!! WARNING: index.html not found"
     fi
-    
+
     sudo chown -R $USER_NAME:$USER_NAME $APP_DIR
 else
     echo "!! WARNING: server.py not found in $SCRIPT_DIR"
